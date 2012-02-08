@@ -1,0 +1,128 @@
+#!/usr/bin/python
+
+# The Following Agent Has Been Tested On:
+# ePowerSwitch 4M+ version : 2.2.0.6
+#
+# Derived from fence_eps in fence-agents-3.1.5-10.el6.x86_64, see: /usr/share/doc/fence-agents-3.1.5/README.licence
+
+
+import sys, re, time, traceback
+import httplib, base64, string,socket
+sys.path.append("/usr/share/fence")
+from fencing import *
+import nhfencing
+import urllib2
+
+#BEGIN_VERSION_GENERATION
+RELEASE_VERSION="1.0.0"
+BUILD_DATE="(built Fri Jan 27 2012)"
+REDHAT_COPYRIGHT="Copyright (C) Nethesis - www.nethesis.it - All rights reserved."
+#END_VERSION_GENERATION
+
+# Log actions and results from EPS device
+def eps_log(options,str):
+	if options["log"]>=LOG_MODE_VERBOSE:
+		options["debug_fh"].write(str)
+
+# Run command on EPS device.
+# @param options Device options
+# @param params HTTP GET parameters (without ?)
+def eps_run_command(options, params):
+	authinfo = urllib2.HTTPPasswordMgrWithDefaultRealm()
+	if (options.has_key("-l")):
+		if (not options.has_key("-p")):
+			options["-p"]="" # Default is empty password
+		authinfo.add_password(None, options["-a"], options['-l'], options["-p"])
+			
+		eps_log(options,"Digest authentication: %s %s %s\n" %  (options["-a"], options['-l'], options["-p"]))
+
+	handler = urllib2.HTTPDigestAuthHandler(authinfo)
+	try:
+		myopener = urllib2.build_opener(handler)
+		opened = urllib2.install_opener(myopener)
+	except:
+		traceback.print_exc(file=sys.stdout)
+		fail(EC_TIMED_OUT)
+	request_str='http://'+options["-a"]+'/'+options["-c"]
+	eps_log(options,"%s \n" % request_str)
+
+	if (params!=""):
+		request_str+="?"+params
+
+	try:
+		output = urllib2.urlopen(request_str)
+	except:
+		traceback.print_exc(file=sys.stdout)
+		fail(EC_LOGIN_DENIED)
+		
+	response =  output.read()
+	eps_log(options,"%s \n" % response)
+
+	return response
+
+def get_power_status(conn, options):
+	ret_val=eps_run_command(options,"")
+
+	result={}
+	status=re.findall("(.*:.*)=(.*)\s*",ret_val.lower())
+	for out_num,out_stat in status:
+		result[out_num]=("",(out_stat.rstrip()))
+	if (not (options["-o"] in ['monitor','list'])):
+		if (not (options["-n"].lower() in result)):
+			fail_usage("Failed: You have to enter existing physical plug!")
+		else:
+			eps_log(options,"get_power_status: %s\n" % result[options["-n"].lower()][1])
+			return result[options["-n"].lower()][1]
+	else:
+		return result
+
+def set_power_status(conn, options):
+	options['-G'] = 0
+	options['-g'] = 2 
+	nhfencing.sleep_priority()
+	eps_run_command(options,"%s=%s"%(options["-n"].lower(),(options["-o"])))
+
+# Define new option
+def eps_define_new_opts():
+	all_opt["hidden_page"]={
+		"getopt" : "c:",
+		"longopt" : "page",
+		"help":"-c, --page=<page>              Name of hidden page (default hidden.htm)",
+		"required" : "0",
+		"shortdesc" : "Name of hidden page",
+		"default" : "hidden.htm",
+		"order": 1
+		}
+
+# Starting point of fence agent
+def main():
+	device_opt = [  "help", "version", "agent", "quiet", "verbose", "debug",
+			"action", "ipaddr", "login", "passwd", "passwd_script",
+			"test", "port", "hidden_page", "no_login", "no_password",
+			"separator" ]
+
+	atexit.register(atexit_handler)
+
+	eps_define_new_opts()
+
+	options = check_input(device_opt,process_input(device_opt))
+
+	docs = { }           
+	docs["shortdesc"] = "Fence agent for ePowerSwitch" 
+	docs["longdesc"] = "fence_eps  is an I/O Fencing agent \
+which can be used with the ePowerSwitch 8M+ power switch to fence \
+connected machines. Fence agent works ONLY on 8M+ device, because \
+this is only one, which has support for hidden page feature. \
+\n.TP\n\
+Agent basically works by connecting to hidden page and pass \
+appropriate arguments to GET request. This means, that hidden \
+page feature must be enabled and properly configured."
+	docs["vendorurl"] = "http://www.epowerswitch.com"
+	show_docs(options, docs)
+
+	#Run fence action. Conn is None, beacause we always need open new http connection
+	result = fence_action(None, options, set_power_status, get_power_status,get_power_status)
+	sys.exit(result)
+
+if __name__ == "__main__":
+	main()
