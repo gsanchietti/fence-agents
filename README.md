@@ -13,12 +13,16 @@ Supported devices
 ======================
 
 Currently supported models:
+
 * Aviosys IP9258 (fence_ip9258)
+
 * EpowerSwitch 4m (fence_eps_4m)
 
 
 Tested on:
+
 * CentOS 5.3
+
 * CentOS 6.2
 
 
